@@ -3,9 +3,31 @@ main = "src/worker.js"
 compatibility_date = "2026-03-19"
 usage_model = "standard"
 
-[vars]
-# API_KEY se define como secret: wrangler secret put API_KEY
-
-[[routes]]
-pattern = "api.tonyml.com/api/*"
+[env.production]
+route = "api.tonyml.com/api/*"
 zone_name = "tonyml.com"
+
+[env.development]
+routes = [
+  { pattern = "localhost:8787/api/*", zone_name = "example.com" }
+]
+
+[build]
+command = "npm install"
+
+[[r2_buckets]]
+binding = "UPLOADS"
+bucket_name = "sinpe-bridge-uploads"
+preview_bucket_name = "sinpe-bridge-uploads-preview"
+
+[observability]
+enabled = true
+
+[vars]
+# API_KEY: set via wrangler secret put API_KEY
+# FASTAPI_BACKEND_URL: URL to FastAPI backend
+ENVIRONMENT = "production"
+LOG_LEVEL = "info"
+CORS_MAX_AGE = "86400"
+REQUEST_TIMEOUT = "30000"
+MAX_BODY_SIZE = "104857600"  # 100MB

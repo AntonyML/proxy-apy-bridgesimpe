@@ -1,12 +1,20 @@
 {
   "name": "proxy-apy-bridgesimpe",
   "version": "1.0.0",
-  "description": "Proxy middleware Worker para api.tonyml.com",
+  "description": "Industrial-grade proxy middleware for SINPE Bridge API",
+  "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "deploy:prod": "wrangler deploy --env production",
+    "secret:set": "wrangler secret put API_KEY",
+    "secret:list": "wrangler secret list",
+    "logs": "wrangler tail --env production"
+  },
+  "dependencies": {
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "wrangler": "^3.0.0"
+    "wrangler": "^3.50.0"
   }
 }
