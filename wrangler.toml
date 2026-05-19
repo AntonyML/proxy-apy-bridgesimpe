@@ -1,0 +1,11 @@
+name = "proxy-apy-bridgesimpe"
+main = "src/worker.js"
+compatibility_date = "2026-03-19"
+usage_model = "standard"
+
+[vars]
+# API_KEY se define como secret: wrangler secret put API_KEY
+
+[[routes]]
+pattern = "api.tonyml.com/api/*"
+zone_name = "tonyml.com"

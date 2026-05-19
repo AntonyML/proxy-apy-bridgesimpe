@@ -1,0 +1,12 @@
+{
+  "name": "proxy-apy-bridgesimpe",
+  "version": "1.0.0",
+  "description": "Proxy middleware Worker para api.tonyml.com",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
