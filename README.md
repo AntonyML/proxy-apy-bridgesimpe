@@ -1,34 +1,54 @@
-# proxy-apy-bridgesimpe
+# SINPE Bridge - Cloudflare Worker Proxy
 
-Worker de Cloudflare que actúa como proxy/middleware para `api.tonyml.com/api/*`.
+Industrial security gateway para SINPE Bridge.
 
-## Funciones
+## Quick Start
 
-- Valida API Key via header `x-api-key`
-- Restringe métodos a GET y POST
-- Valida `Content-Type: application/json` en POST
-- Bloquea user-agents sospechosos
-- Pasa el request al Tunnel si todo es válido
-
-## Desarrollo local
+### Development
 
 ```bash
 npm install
-npx wrangler dev
+npm run dev
 ```
 
-## Deploy
+Accesible en `http://localhost:8787`
+
+### Production
 
 ```bash
-npx wrangler deploy
+npm install
+wrangler secret put API_KEY --env production
+npm run deploy:prod
 ```
 
-## Secrets
+## Configuration
 
-```bash
-npx wrangler secret put API_KEY
+Valores locales en `.dev.vars`:
+```
+API_KEY=test-api-key-12345
+FASTAPI_BACKEND_URL=http://localhost:8000
 ```
 
-## Ruta activa
+## Features
 
-`api.tonyml.com/api/*` → zone: `tonyml.com`
+- ✅ HMAC SHA-256 validation
+- ✅ Multipart/form-data streaming
+- ✅ CORS whitelist
+- ✅ User-Agent blocking
+- ✅ Request correlation IDs
+- ✅ Structured logging
+
+## Architecture
+
+9-phase validation pipeline:
+1. CORS preflight
+2. Route filtering
+3. Method validation
+4. Origin validation
+5. User-Agent check
+6. API Key validation
+7. Content-Type check
+8. HMAC signature validation
+9. Request forwarding
+
+See `src/worker.js` for implementation.
