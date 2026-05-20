@@ -1,6 +1,8 @@
 name = "proxy-apy-bridgesimpe"
 main = "src/worker.js"
-compatibility_date = "2026-05-20"
+compatibility_date = "2025-01-01"
+workers_dev = false
+preview_urls = false
 
 routes = [
   { pattern = "api.tonyml.com/api/*", zone_name = "tonyml.com" },
@@ -19,5 +21,4 @@ enabled = true
 ENVIRONMENT = "production"
 LOG_LEVEL    = "info"
 
-# Secrets (set via CLI — not stored here):
-#   wrangler secret put API_KEY
+# wrangler secret put API_KEY
