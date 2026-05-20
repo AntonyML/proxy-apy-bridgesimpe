@@ -2,7 +2,7 @@
  * SINPE Bridge - Cloudflare Worker Proxy
  */
 
-const BACKEND_URL = "https://f254-163-178-208-11.ngrok-free.app";
+const BACKEND_URL = " https://0261-163-178-208-11.ngrok-free.app";
 
 const ALLOWED_ORIGINS = [
   "capacitor://localhost",
