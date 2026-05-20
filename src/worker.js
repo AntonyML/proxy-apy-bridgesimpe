@@ -14,7 +14,6 @@
 // CONFIGURATION
 // ============================================================================
 
-/** NEVER use request.url as the fetch target — always use this constant. */
 const BACKEND_URL = "https://f254-163-178-208-11.ngrok-free.app";
 
 const ALLOWED_ORIGINS = [
@@ -45,6 +44,12 @@ const STRIP_REQUEST_HEADERS = [
   "cf-worker",
   "x-real-ip",
   "host",
+  "transfer-encoding",
+  "connection",
+  "keep-alive",
+  "te",
+  "trailer",
+  "upgrade",
 ];
 
 // ============================================================================
@@ -69,10 +74,8 @@ function generateTraceContext(request) {
 }
 
 function isOriginAllowed(origin) {
-  if (!origin) return true; // mobile apps often omit Origin
-  return ALLOWED_ORIGINS.some(
-    (a) => origin === a || origin.startsWith(a)
-  );
+  if (!origin) return true;
+  return ALLOWED_ORIGINS.some((a) => origin === a || origin.startsWith(a));
 }
 
 function isUserAgentBlocked(ua) {
@@ -146,33 +149,15 @@ async function validateHmacSignature(request, apiKey) {
   }
 }
 
-/**
- * Transform incoming path + search into a fully-qualified backend URL string.
- *
- *   Incoming:  https://api.tonyml.com/api/health?foo=bar
- *   Returns:   https://f254-163-178-208-11.ngrok-free.app/health?foo=bar
- *
- * The result is always a string that starts with BACKEND_URL — never
- * the worker's own domain.
- */
 function buildTargetURL(incomingURL) {
   const incoming = new URL(incomingURL);
-
-  // Strip the /api prefix; fall back to "/" if nothing remains
-  const path = incoming.pathname.replace(/^\/api/, "") || "/";
-
-  // Build from the BACKEND_URL constant — never from request.url
-  const target = new URL(BACKEND_URL);
+  const path     = incoming.pathname.replace(/^\/api/, "") || "/";
+  const target   = new URL(BACKEND_URL);
   target.pathname = path;
   target.search   = incoming.search;
-
-  return target.toString(); // plain string, e.g. "https://ngrok-host/health"
+  return target.toString();
 }
 
-/**
- * Build the headers and init object for the upstream fetch.
- * Body stream is passed through untouched — no cloning, no buffering.
- */
 function buildFetchInit(request, trace) {
   const headers = new Headers();
 
@@ -182,25 +167,27 @@ function buildFetchInit(request, trace) {
     }
   }
 
-  headers.set("x-request-id",              trace.requestId);
-  headers.set("x-correlation-id",          trace.correlationId);
-  headers.set("x-trace-id",               trace.traceId);
-  headers.set("x-forwarded-by",           "cf-sinpe-bridge");
-  headers.set("x-forwarded-proto",        "https");
-  headers.set("x-forwarded-time",         trace.timestamp);
+  headers.set("x-request-id",               trace.requestId);
+  headers.set("x-correlation-id",           trace.correlationId);
+  headers.set("x-trace-id",                 trace.traceId);
+  headers.set("x-forwarded-by",             "cf-sinpe-bridge");
+  headers.set("x-forwarded-proto",          "https");
+  headers.set("x-forwarded-time",           trace.timestamp);
   headers.set("ngrok-skip-browser-warning", "true");
-  headers.set("host",                      new URL(BACKEND_URL).host);
+  headers.set("host",                       new URL(BACKEND_URL).host);
 
-  /** @type {RequestInit} */
+  const isBodyMethod = request.method !== "GET" && request.method !== "HEAD";
+
   const init = {
     method:   request.method,
     headers,
     redirect: "follow",
   };
 
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body   = request.body; // stream passthrough — preserves multipart boundaries
-    init.duplex = "half";       // required for streaming bodies in Workers runtime
+  if (isBodyMethod) {
+    init.body = request.body;
+    // NOTE: duplex:"half" intentionally omitted — causes connection resets
+    // against ngrok/FastAPI upstreams in Cloudflare Workers runtime.
   }
 
   return init;
@@ -277,29 +264,22 @@ export default {
     }
 
     // ── PHASE 8: Forward to backend ────────────────────────────────────────
-    //
-    // targetURL is a plain string pointing at BACKEND_URL — NEVER request.url.
-    // This is the only place fetch() is called; there is no path that calls
-    // fetch(request) or fetch(request.url).
-    //
     const targetURL = buildTargetURL(request.url);
     const fetchInit = buildFetchInit(request, trace);
 
     console.log(JSON.stringify({
-      level:         "info",
-      event:         "proxy_forward",
+      level:        "info",
+      event:        "proxy_forward",
       method,
-      incomingPath:  url.pathname,
+      incomingPath: url.pathname,
       targetURL,
-      requestId:     trace.requestId,
-      correlationId: trace.correlationId,
-      timestamp:     trace.timestamp,
+      requestId:    trace.requestId,
+      correlationId:trace.correlationId,
+      timestamp:    trace.timestamp,
     }));
 
     let upstream;
     try {
-      // fetch(string, init) — explicit string URL, no Request wrapper,
-      // zero risk of Cloudflare reusing the original request's URL.
       upstream = await fetch(targetURL, fetchInit);
     } catch (err) {
       console.error(JSON.stringify({
