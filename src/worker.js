@@ -26,7 +26,7 @@ const ALLOWED_CONTENT_TYPES = [
   "application/x-www-form-urlencoded",
 ];
 
-// Hop-by-hop + internal headers stripped before forwarding
+// Hop-by-hop + internal headers stripped before forwarding to upstream
 const STRIP_REQUEST_HEADERS = [
   "x-api-key",
   "x-signature",
@@ -39,6 +39,8 @@ const STRIP_REQUEST_HEADERS = [
   "host",
   "connection",
   "keep-alive",
+  "transfer-encoding", // re-set automatically by fetch()
+  "content-length",    // re-set automatically by fetch() from buffered body
   "te",
   "trailer",
   "upgrade",
@@ -96,12 +98,12 @@ function errorResponse(status, message, origin, trace) {
   );
 }
 
-// HMAC validation — only for application/json, never for multipart
+// HMAC validation — only for application/json, never for multipart.
+// Uses request.clone() so the original body stream remains unconsumed.
 async function verifyHmac(request, apiKey) {
   const sig = request.headers.get("x-signature");
-  if (!sig) return true; // signature optional
+  if (!sig) return true;
   try {
-    // clone() here is safe: JSON body not yet consumed, multipart never reaches this path
     const body = await request.clone().text();
     const enc  = new TextEncoder();
     const key  = await crypto.subtle.importKey(
@@ -117,7 +119,7 @@ async function verifyHmac(request, apiKey) {
   }
 }
 
-// /api/health?q=1  →  https://0261-163-178-208-11.ngrok-free.app/health?q=1
+// /api/uploads/receipts  →  https://ngrok-host/uploads/receipts
 function buildTargetURL(incomingURL) {
   const u    = new URL(incomingURL);
   const path = u.pathname.replace(/^\/api/, "") || "/";
@@ -150,7 +152,7 @@ async function handleRequest(request, env) {
   const ua     = request.headers.get("user-agent") || "";
   const trace  = generateTrace(request);
 
-  // ── OPTIONS preflight ────────────────────────────────────────────────────
+  // OPTIONS preflight
   if (method === "OPTIONS") {
     if (origin && !isOriginAllowed(origin)) {
       return errorResponse(403, "CORS: Origin not allowed", origin, trace);
@@ -161,54 +163,52 @@ async function handleRequest(request, env) {
     });
   }
 
-  // ── Route guard ──────────────────────────────────────────────────────────
+  // Route guard
   if (!url.pathname.startsWith("/api")) {
     return errorResponse(404, "Not found", origin, trace);
   }
 
-  // ── Method guard ─────────────────────────────────────────────────────────
+  // Method guard
   if (!ALLOWED_METHODS.includes(method)) {
     return errorResponse(405, "Method not allowed", origin, trace);
   }
 
-  // ── Origin guard ─────────────────────────────────────────────────────────
+  // Origin guard
   if (origin && !isOriginAllowed(origin)) {
     return errorResponse(403, "CORS: Origin not allowed", origin, trace);
   }
 
-  // ── UA guard ─────────────────────────────────────────────────────────────
+  // UA guard
   if (isUABlocked(ua)) {
     return errorResponse(403, "Client blocked", origin, trace);
   }
 
-  // ── API key ──────────────────────────────────────────────────────────────
+  // API key
   const apiKey = request.headers.get("x-api-key");
   if (!apiKey || apiKey !== env.API_KEY) {
     return errorResponse(401, "Unauthorized", origin, trace);
   }
 
-  // ── Content-type + HMAC (body methods only) ──────────────────────────────
   const hasBody = method !== "GET" && method !== "HEAD";
+  const ct      = (request.headers.get("content-type") || "").toLowerCase();
+
+  // Content-type guard + HMAC (body requests only)
   if (hasBody) {
-    const ct   = (request.headers.get("content-type") || "").toLowerCase();
     const ctOk = ALLOWED_CONTENT_TYPES.some((a) => ct.includes(a));
     if (!ctOk) return errorResponse(400, "Invalid content-type", origin, trace);
 
-    // HMAC only for JSON — multipart/form-data bypasses HMAC entirely
+    // HMAC only for JSON. multipart bypasses entirely — no stream touch.
     if (ct.includes("application/json")) {
       if (!(await verifyHmac(request, apiKey))) {
         return errorResponse(401, "Invalid HMAC signature", origin, trace);
       }
     }
-    // multipart/form-data: boundary preserved, no HMAC, stream not touched here
   }
 
-  // ── Build upstream URL ───────────────────────────────────────────────────
-  const targetURL = buildTargetURL(request.url);
-
   // ── Build forwarding headers ─────────────────────────────────────────────
-  // Copy all safe headers from the original request (preserves Content-Type
-  // with multipart boundary — we never overwrite it manually).
+  // Content-Type is copied verbatim — multipart boundary is preserved.
+  // content-length and transfer-encoding are stripped; fetch() recalculates
+  // them from the buffered ArrayBuffer body, avoiding stream-locking issues.
   const headers = new Headers();
   for (const [k, v] of request.headers.entries()) {
     if (!STRIP_REQUEST_HEADERS.includes(k.toLowerCase())) {
@@ -223,22 +223,31 @@ async function handleRequest(request, env) {
   headers.set("x-forwarded-time",           trace.timestamp);
   headers.set("ngrok-skip-browser-warning", "true");
 
-  // ── Fetch init ───────────────────────────────────────────────────────────
-  // duplex:"half" is required by the Workers runtime whenever a streaming
-  // request body is forwarded (POST/PUT/PATCH multipart, JSON, binary).
-  // It must NOT be set for GET / HEAD.
+  // ── Buffer body and build fetch init ─────────────────────────────────────
+  //
+  // We buffer the entire request body as an ArrayBuffer before forwarding.
+  // This avoids ReadableStream locking issues that cause "Connection reset"
+  // errors when Cloudflare Workers proxy multipart/form-data to ngrok.
+  //
+  // duplex:"half" is intentionally NOT used — it triggers stream-mode
+  // which conflicts with ngrok's connection handling and causes TCP RST.
+  //
   const init = { method, headers, redirect: "follow" };
-  if (method !== "GET" && method !== "HEAD") {
-    init.body   = request.body; // stream passthrough — boundary intact, not buffered
-    init.duplex = "half";       // required for streaming body in Workers → ngrok
+  if (hasBody) {
+    init.body = await request.arrayBuffer(); // fully buffered — no stream lock
   }
+
+  const targetURL = buildTargetURL(request.url);
 
   console.log(JSON.stringify({
     level: "info", event: "proxy_forward",
-    method, targetURL, requestId: trace.requestId, timestamp: trace.timestamp,
+    method, targetURL,
+    ct: ct.split(";")[0].trim(),
+    requestId: trace.requestId,
+    timestamp: trace.timestamp,
   }));
 
-  // ── Upstream fetch — always targets BACKEND_URL, never the worker itself ─
+  // fetch() target is always BACKEND_URL — never request.url
   let upstream;
   try {
     upstream = await fetch(targetURL, init);
@@ -250,7 +259,6 @@ async function handleRequest(request, env) {
     return errorResponse(502, "Bad Gateway: upstream unreachable", origin, trace);
   }
 
-  // ── Build response headers ───────────────────────────────────────────────
   const respHeaders = new Headers(upstream.headers);
   respHeaders.set("x-request-id",     trace.requestId);
   respHeaders.set("x-correlation-id", trace.correlationId);
