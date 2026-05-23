@@ -1,23 +1,49 @@
-const BACKEND_URL = "https://0261-163-178-208-11.ngrok-free.app";
+const BACKEND_URL =
+  "https://super-duper-space-broccoli-gg49xpjx57jfp774-8000.app.github.dev";
 
 export default {
   async fetch(request) {
-    const url  = new URL(request.url);
-    const path = url.pathname.replace(/^\/api/, "") || "/";
+    try {
+      const incomingUrl = new URL(request.url);
 
-    const target = new URL(BACKEND_URL);
-    target.pathname = path;
-    target.search   = url.search;
+      const target = new URL(BACKEND_URL);
 
-    const headers = new Headers(request.headers);
-    headers.set("ngrok-skip-browser-warning", "true");
-    headers.delete("host");
+      target.pathname =
+        incomingUrl.pathname.replace(/^\/api/, "") || "/";
 
-    const init = { method: request.method, headers, redirect: "follow" };
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      init.body = await request.arrayBuffer();
+      target.search = incomingUrl.search;
+
+      const headers = new Headers(request.headers);
+
+      headers.set("x-forwarded-host", incomingUrl.host);
+      headers.delete("host");
+
+      const init = {
+        method: request.method,
+        headers,
+        redirect: "follow",
+      };
+
+      if (!["GET", "HEAD"].includes(request.method)) {
+        init.body = request.body;
+        init.duplex = "half";
+      }
+
+      const response = await fetch(target.toString(), init);
+
+      return new Response(response.body, {
+        status: response.status,
+        headers: response.headers,
+      });
+
+    } catch (error) {
+      return Response.json(
+        {
+          error: "Backend unavailable",
+          detail: error.message,
+        },
+        { status: 502 }
+      );
     }
-
-    return fetch(target.toString(), init);
   },
 };
