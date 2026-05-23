@@ -15,11 +15,8 @@
 
 const BACKEND_URL = "https://sinpe-bridge-api.fly.dev";
 const INCOMING_PREFIX = "/api/v1"; // lo que llega al Worker
-const BACKEND_PREFIX = "";         // lo que tiene el backend (vacío = raíz)
+const BACKEND_PREFIX = "";         // el backend vive en la raíz
 
-/**
- * Origins permitidos para CORS
- */
 const ALLOWED_ORIGINS = [
   "capacitor://localhost",
   "ionic://localhost",
@@ -88,7 +85,9 @@ function generateTrace(request) {
 
 function isOriginAllowed(origin) {
   if (!origin) return true;
-  return ALLOWED_ORIGINS.some((allowed) => origin === allowed || origin.startsWith(allowed));
+  return ALLOWED_ORIGINS.some(
+    (allowed) => origin === allowed || origin.startsWith(allowed)
+  );
 }
 
 function isUABlocked(ua) {
@@ -110,7 +109,7 @@ function corsHeaders(origin) {
       "x-device-id",
     ].join(", "),
     "Access-Control-Max-Age": "86400",
-    "Vary": "Origin",
+    Vary: "Origin",
   };
 }
 
@@ -133,6 +132,17 @@ function errorResponse(status, message, origin, trace) {
       },
     }
   );
+}
+
+// Rutas públicas: no requieren API key
+function isPublicPath(pathname) {
+  return [
+    "/api/v1/health",
+    "/api/v1/docs",
+    "/api/v1/openapi.json",
+    "/api/v1/redoc",
+    "/api/v1/docs/oauth2-redirect",
+  ].includes(pathname);
 }
 
 // Valida HMAC SHA-256 solo para application/json.
@@ -166,10 +176,8 @@ async function verifyHmac(request, apiKey) {
 
 /**
  * Convierte:
- *   /api/v1/health  ->  /health
+ *   /api/v1/health   -> /health
  *   /api/v1/payments -> /payments
- *
- * Si llega otra cosa, la deja tal cual.
  */
 function rewritePath(pathname) {
   if (pathname === INCOMING_PREFIX) return "/";
@@ -255,26 +263,33 @@ async function handleRequest(request, env) {
     return errorResponse(403, "Client blocked", origin, trace);
   }
 
-  // ── Validación API Key ─────────────────────────────────────────────────────
-  const apiKey = request.headers.get("x-api-key");
-  if (!apiKey || apiKey !== env.API_KEY) {
-    return errorResponse(401, "Unauthorized: invalid API key", origin, trace);
-  }
-
-  // ── Validación Content-Type + HMAC (solo requests con body) ───────────────
-  const hasBody = !["GET", "HEAD", "DELETE"].includes(method);
-  const ct = (request.headers.get("content-type") || "").toLowerCase();
-
-  if (hasBody && ct) {
-    const ctOk = ALLOWED_CONTENT_TYPES.some((allowed) => ct.includes(allowed));
-    if (!ctOk) {
-      return errorResponse(400, "Invalid content-type", origin, trace);
+  // ── API key solo para rutas privadas ───────────────────────────────────────
+  if (!isPublicPath(url.pathname)) {
+    const apiKey = request.headers.get("x-api-key");
+    if (!apiKey || apiKey !== env.API_KEY) {
+      return errorResponse(401, "Unauthorized: invalid API key", origin, trace);
     }
 
-    if (ct.includes("application/json")) {
-      const ok = await verifyHmac(request, apiKey);
-      if (!ok) {
-        return errorResponse(401, "Unauthorized: invalid HMAC signature", origin, trace);
+    // ── Validación Content-Type + HMAC (solo requests con body) ─────────────
+    const hasBody = !["GET", "HEAD", "DELETE"].includes(method);
+    const ct = (request.headers.get("content-type") || "").toLowerCase();
+
+    if (hasBody && ct) {
+      const ctOk = ALLOWED_CONTENT_TYPES.some((allowed) => ct.includes(allowed));
+      if (!ctOk) {
+        return errorResponse(400, "Invalid content-type", origin, trace);
+      }
+
+      if (ct.includes("application/json")) {
+        const ok = await verifyHmac(request, apiKey);
+        if (!ok) {
+          return errorResponse(
+            401,
+            "Unauthorized: invalid HMAC signature",
+            origin,
+            trace
+          );
+        }
       }
     }
   }
@@ -295,6 +310,7 @@ async function handleRequest(request, env) {
   headers.set("x-forwarded-time", trace.timestamp);
 
   // ── Bufferar body ──────────────────────────────────────────────────────────
+  const hasBody = !["GET", "HEAD", "DELETE"].includes(method);
   const init = {
     method,
     headers,
@@ -312,7 +328,7 @@ async function handleRequest(request, env) {
     event: "proxy_forward",
     method,
     targetURL,
-    ct: ct.split(";")[0].trim(),
+    ct: (request.headers.get("content-type") || "").split(";")[0].trim(),
     requestId: trace.requestId,
     timestamp: trace.timestamp,
   }));
