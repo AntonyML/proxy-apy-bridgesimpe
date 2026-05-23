@@ -1,5 +1,4 @@
-const BACKEND_URL =
-  "https://super-duper-space-broccoli-gg49xpjx57jfp774-8000.app.github.dev";
+const BACKEND_URL = "https://sinpe-bridge-api.fly.dev";
 
 export default {
   async fetch(request) {
@@ -8,13 +7,11 @@ export default {
 
       const target = new URL(BACKEND_URL);
 
-      target.pathname =
-        incomingUrl.pathname.replace(/^\/api/, "") || "/";
-
+      // Pasar el path tal cual — FastAPI ya maneja /api/v1/...
+      target.pathname = incomingUrl.pathname || "/";
       target.search = incomingUrl.search;
 
       const headers = new Headers(request.headers);
-
       headers.set("x-forwarded-host", incomingUrl.host);
       headers.delete("host");
 
