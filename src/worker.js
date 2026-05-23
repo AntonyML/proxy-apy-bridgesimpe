@@ -15,7 +15,7 @@
 
 const BACKEND_URL = "https://sinpe-bridge-api.fly.dev";
 const INCOMING_PREFIX = "/api/v1"; // lo que llega al Worker
-const BACKEND_PREFIX = "";         // el backend vive en la raíz
+const BACKEND_PREFIX = "/api/v1";        // lo que se envía al backend (puede ser diferente o igual al incoming)
 
 const ALLOWED_ORIGINS = [
   "capacitor://localhost",
