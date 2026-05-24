@@ -2,7 +2,8 @@
  * SINPE Bridge — Cloudflare Worker Proxy
  *
  * Flujo:
- *   api.tonyml.com/api/v1/* → (valida) → sinpe-bridge-api.fly.dev/*
+ *   api.tonyml.com/api/v1/* → (valida) → sinpe-bridge-api.fly.dev/api/v1/*
+ *   api.tonyml.com/health   → (valida) → sinpe-bridge-api.fly.dev/health
  *
  * Seguridad:
  *   - Validación de API Key (x-api-key)
@@ -15,7 +16,7 @@
 
 const BACKEND_URL = "https://sinpe-bridge-api.fly.dev";
 const INCOMING_PREFIX = "/api/v1"; // lo que llega al Worker
-const BACKEND_PREFIX = "/api/v1";        // lo que se envía al backend (puede ser diferente o igual al incoming)
+const BACKEND_PREFIX = "/api/v1";  // lo que se envía al backend (puede ser diferente o igual al incoming)
 
 const ALLOWED_ORIGINS = [
   "capacitor://localhost",
@@ -137,6 +138,9 @@ function errorResponse(status, message, origin, trace) {
 // Rutas públicas: no requieren API key
 function isPublicPath(pathname) {
   return [
+    "/",
+    "/health",
+    "/ready",
     "/api/v1/health",
     "/api/v1/docs",
     "/api/v1/openapi.json",
@@ -176,8 +180,8 @@ async function verifyHmac(request, apiKey) {
 
 /**
  * Convierte:
- *   /api/v1/health   -> /health
- *   /api/v1/payments -> /payments
+ *   /api/v1/health  -> /api/v1/health
+ *   /health         -> /health
  */
 function rewritePath(pathname) {
   if (pathname === INCOMING_PREFIX) return "/";
@@ -185,6 +189,7 @@ function rewritePath(pathname) {
     const rest = pathname.slice(INCOMING_PREFIX.length);
     return BACKEND_PREFIX + rest;
   }
+  // Si no empieza con INCOMING_PREFIX (ej. /health), lo deja intacto
   return pathname;
 }
 
@@ -245,8 +250,10 @@ async function handleRequest(request, env) {
     });
   }
 
-  // ── Solo rutas /api/v1/* ───────────────────────────────────────────────────
-  if (!url.pathname.startsWith(INCOMING_PREFIX)) {
+  // ── Filtro de Rutas Permitidas ─────────────────────────────────────────────
+  const isAllowedRootPath = ["/", "/health", "/ready"].includes(url.pathname);
+
+  if (!url.pathname.startsWith(INCOMING_PREFIX) && !isAllowedRootPath) {
     return errorResponse(404, "Not found", origin, trace);
   }
 
